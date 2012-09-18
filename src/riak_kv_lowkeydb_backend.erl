@@ -93,8 +93,12 @@ put(Bucket, Key, _IndexSpec, Value, #state{folder_ref=Folder}=State) ->
 -spec delete(riak_object:bucket(), riak_object:key(), [index_spec()], state()) ->
                     {ok, state()} |
                     {error, term(), state()}.
-delete(_Bucket, _Object, _IndexSpecs, State) ->
-	{ok, State}.
+delete(Bucket, Key, _IndexSpecs, #state{folder_ref=Folder}=State) ->
+  KeyFile = filename:join([Folder, Bucket, Key]),
+  case file:delete(KeyFile) of
+  ok -> {ok, State};
+  {error, Reason} -> {error, Reason, State}
+  end.
 
 %% @doc Fold over all the buckets
 -spec fold_buckets(riak_kv_backend:fold_buckets_fun(),
