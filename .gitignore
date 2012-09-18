@@ -1,3 +1,5 @@
 *.swp
 ebin/
 deps/
+.project
+.settings
