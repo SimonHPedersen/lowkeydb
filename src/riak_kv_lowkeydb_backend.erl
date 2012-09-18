@@ -68,8 +68,13 @@ stop(_State) ->
                  {ok, any(), state()} |
                  {ok, not_found, state()} |
                  {error, term(), state()}.
-get(_Bucket, _Key, State) ->
-	{error, not_found, State}.
+get(Bucket, Key, #state{folder_ref=Folder}=State) ->
+  KeyFile = filename:join([Folder, Bucket, Key]),
+  case file:read_file(KeyFile) of
+  {ok, Value} -> {ok, Value, State};
+  {error, enoent} -> {error, not_found, State};
+  {error, Reason} -> {error, Reason, State}
+  end.
 
 
 %% @doc Insert an object into the backend.
