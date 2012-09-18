@@ -22,7 +22,7 @@
 -record(state, {folder_ref :: string()}).
 
 -type state() :: #state{}.
--type config() :: [].
+-type config() :: [any()].
 
 -define(API_VERSION, 1).
 -define(CAPABILITIES, []).
@@ -131,13 +131,28 @@ fold_buckets(FoldFun, Acc, _Opts, #state{folder_ref=Folder}) ->
 		{error, _Reason} -> {error, "Error listing buckets"}
 	end.
 
+lowkey_uber_folder_fun(FoldFun, Bucket) ->
+  fun (Key, Acc) ->
+    StringKey = filename:basename(list_to_binary(Key)),
+    [_|Tail] = string:tokens(binary_to_list(StringKey), "_"),
+    case string:equal(Tail, ["content"]) of
+      true -> Acc;
+      false -> FoldFun(Bucket, StringKey, Acc)
+    end
+  end.
+
 %% @doc Fold over all the keys for one or all buckets.
 -spec fold_keys(riak_kv_backend:fold_keys_fun(),
                 any(),
                 [{atom(), term()}],
                 state()) -> {ok, term()} | {async, fun()}.
-fold_keys(_FoldKeyFun, _Acc, _Opts, _State) ->
-	{ok, doki}.
+fold_keys(FoldKeyFun, Acc, Opts, #state{folder_ref=Folder}) ->
+  Bucket = proplists:get_value(bucket, Opts),
+  RealFun = lowkey_uber_folder_fun(FoldKeyFun, Bucket),
+  {ok, Files} = file_utils:recursively_list_dir(Folder, true),
+  AccOut = lists:foldl(RealFun, Acc, Files),
+    {ok, AccOut}.
+
 
 %% @doc Fold over all the objects for one or all buckets.
 -spec fold_objects(riak_kv_backend:fold_objects_fun(),
