@@ -1,10 +1,12 @@
+
 -module(riak_kv_lowkeydb_backend).
+-compile([{parse_transform, lager_transform}]).
 %%-behavior(riak_kv_backend).
 
 %% Riak Storage Backend API
 -export([%%api_version/0,
-         start/2
-         %%stop/1,
+         start/2,
+         stop/1
          %%get/3,
          %%put/5,
          %%delete/4,
@@ -34,17 +36,22 @@
 
 %% @doc Start the backend
 -spec start(integer(), config()) -> {ok, state()} | {error, term()}.
-start(Partition, Config) -> 
+start(Partition, Config) ->
+  lager:set_loglevel(lager_console_backend, debug), 
   Folder = app_helper:get_prop_or_env(folder, Config, lowkey),
-  io:fwrite("Folder: ~w ~n", [Folder]),
-
- {ok, #state{}}.
+  NodeFolder = filename:join(Folder, io_lib:format("~w", [Partition])),
+  lager:debug("Folder: ~w", [NodeFolder]),
+  % NodeFolder = "/home/kaspar/riak/dev/dev1/data/",
+  filelib:ensure_dir(filename:join(NodeFolder, "dummy")),
+  {ok, #state{folder_ref=NodeFolder}}.
 
  %%folder_ref=Folder}}.
 
 
 %% @doc Stop the backend
-%%-spec stop(state()) -> ok.
+-spec stop(state()) -> ok.
+stop(_State) ->
+    ok.
 
 %% @doc Retrieve an object from the backend
 %%-spec get(riak_object:bucket(), riak_object:key(), state()) ->
