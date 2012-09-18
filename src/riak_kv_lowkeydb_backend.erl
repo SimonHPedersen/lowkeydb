@@ -25,7 +25,7 @@
 -type config() :: [].
 
 -define(API_VERSION, 1).
--define(CAPABILITIES, [async_fold, indexes]).
+-define(CAPABILITIES, []).
 
 %% ===================================================================
 %% Public API
@@ -111,13 +111,25 @@ delete(Bucket, Key, _IndexSpecs, #state{folder_ref=Folder}=State) ->
   {error, Reason} -> {error, Reason, State}
   end.
 
+%% @doc Creates a fun that converts entries to string, and then pass it on to FoldFun
+list_to_binary_fold_fun(FoldFun) ->
+	fun (Folder, Acc) ->
+		StringFolder = list_to_binary(Folder),
+		FoldFun(StringFolder, Acc)
+	end.
+
 %% @doc Fold over all the buckets
 -spec fold_buckets(riak_kv_backend:fold_buckets_fun(),
                    any(),
                    [any],
                    state()) -> {ok, any()} | {async, fun()}.
-fold_buckets(_Fun, _Acc, _Opts, _State) ->
-	{ok, doki}.
+fold_buckets(FoldFun, Acc, _Opts, #state{folder_ref=Folder}) ->
+	RealFun = list_to_binary_fold_fun(FoldFun),
+	case file:list_dir(Folder) of
+		{ok, Files} -> AccOut = lists:foldl(RealFun, Acc, Files),
+					   {ok, AccOut};
+		{error, _Reason} -> {error, "Error listing buckets"}
+	end.
 
 %% @doc Fold over all the keys for one or all buckets.
 -spec fold_keys(riak_kv_backend:fold_keys_fun(),
