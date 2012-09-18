@@ -84,10 +84,21 @@ get(Bucket, Key, #state{folder_ref=Folder}=State) ->
                  {error, term(), state()}.
 
 put(Bucket, Key, _IndexSpec, Value, #state{folder_ref=Folder}=State) ->
-  KeyFile = filename:join([Folder, Bucket, Key]),
-  filelib:ensure_dir(KeyFile),
-  file:write_file(KeyFile, Value),
-	{ok, State}.
+  RawFile = filename:join([Folder, Bucket, Key]),
+  filelib:ensure_dir(RawFile),
+  ContentFile = filename:join([Folder, Bucket, string:concat(binary_to_list(Key), "_content")]),
+  lager:debug("put ValueAsTerm ~p", [binary_to_term(Value)]),
+  [ContentTerm] = element(4, binary_to_term(Value)), %% unpack list by using []
+  lager:debug("put ContentTerm ~p", [ContentTerm]),
+  FirstElem = element(1, ContentTerm),
+  lager:debug("put FirstElem ~p", [FirstElem]),
+  MetaInf = element(2, ContentTerm),
+  lager:debug("put MetaInf ~p", [MetaInf]),
+  ContentAsIntArray = binary_to_list(element(3, ContentTerm)),
+  lager:debug("put Content ~p", [ContentAsIntArray]),
+  file:write_file(RawFile, Value),
+  file:write_file(ContentFile, ContentAsIntArray),
+  {ok, State}.
 
 %% @doc Delete an object from the backend
 -spec delete(riak_object:bucket(), riak_object:key(), [index_spec()], state()) ->
