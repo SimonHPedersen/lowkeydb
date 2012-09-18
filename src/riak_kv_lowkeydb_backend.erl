@@ -1,9 +1,11 @@
 
 -module(riak_kv_lowkeydb_backend).
-%%-behavior(riak_kv_backend).
+%-behavior(riak_kv_backend).
 
 %% Riak Storage Backend API
 -export([api_version/0,
+         capabilities/1,
+         capabilities/2,
          start/2,
          stop/1,
          get/3,
@@ -23,6 +25,7 @@
 -type config() :: [].
 
 -define(API_VERSION, 1).
+-define(CAPABILITIES, [async_fold, indexes]).
 
 %% ===================================================================
 %% Public API
@@ -36,10 +39,20 @@
 api_version() -> 
 	{?API_VERSION, [alpha]}.
 
+%% @doc Return the capabilities of the backend.
+-spec capabilities(state()) -> {ok, [atom()]}.
+capabilities(_) ->
+  {ok, ?CAPABILITIES}.
+
+%% @doc Return the capabilities of the backend.
+-spec capabilities(riak_object:bucket(), state()) -> {ok, [atom()]}.
+capabilities(_, _) ->
+  {ok, ?CAPABILITIES}.
+
 %% @doc Start the backend
 -spec start(integer(), config()) -> {ok, state()} | {error, term()}.
-start(Partition, _Config) -> 
-  Folder = "~/riak/dev/dev1/data/lowkey",%app_helper:get_prop_or_env(data_root, Config, lowkey),
+start(Partition, Config) ->
+  Folder = app_helper:get_prop_or_env(data_root, Config, lowkeydb),
   NodeFolder = filename:join(Folder, integer_to_list(Partition)),
   lager:debug("Folder: ~p", [NodeFolder]),
   filelib:ensure_dir(filename:join(NodeFolder, "dummy")),
@@ -65,7 +78,10 @@ get(_Bucket, _Key, State) ->
                  {ok, state()} |
                  {error, term(), state()}.
 
-put(_Bucket, _Key, _IndexSpec, _Value, State) ->
+put(Bucket, Key, _IndexSpec, Value, #state{folder_ref=Folder}=State) ->
+  KeyFile = filename:join([Folder, Bucket, Key]),
+  filelib:ensure_dir(KeyFile),
+  file:write_file(KeyFile, Value),
 	{ok, State}.
 
 %% @doc Delete an object from the backend
@@ -78,7 +94,7 @@ delete(_Bucket, _Object, _IndexSpecs, State) ->
 %% @doc Fold over all the buckets
 -spec fold_buckets(riak_kv_backend:fold_buckets_fun(),
                    any(),
-                   [],
+                   [any],
                    state()) -> {ok, any()} | {async, fun()}.
 fold_buckets(_Fun, _Acc, _Opts, _State) ->
 	{ok, doki}.
