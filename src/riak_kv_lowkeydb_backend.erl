@@ -87,7 +87,7 @@ get(Bucket, Key, #state{folder_ref=Folder}=State) ->
                  {ok, state()} |
                  {error, term(), state()}.
 
-put(Bucket, Key, IndexSpec, Value, #state{folder_ref=Folder}=State) ->
+put(Bucket,  Key, IndexSpec, Value, #state{folder_ref=Folder}=State) ->
   RawFile = filename:join([Folder, "buckets", Bucket, Key]),
   filelib:ensure_dir(RawFile),
   ContentFile = filename:join([Folder, Bucket, string:concat(binary_to_list(Key), "_content")]),
@@ -96,10 +96,33 @@ put(Bucket, Key, IndexSpec, Value, #state{folder_ref=Folder}=State) ->
   file:write_file(RawFile, Value),
   file:write_file(ContentFile, ContentAsIntArray),
 
-  %% put indeces
-  lager:error("Index: ~p", IndexSpec),
-
+  %% update indeces
+  apply_index_spec(IndexSpec, Folder),
   {ok, State}.
+
+apply_index_spec([], _Folder) -> 0;
+
+apply_index_spec([{Command, IndexName, IndexValue} | Tail], Folder) ->
+  %% lager:error("aplying indexSpec. Command ~p, IndexName ~p, IndexValue ~p", [Command, IndexName, IndexValue]),
+  case Command of
+    add ->
+      add_index(IndexName, IndexValue, Folder);
+    remove ->
+      remove_index(IndexName, IndexValue, Folder);
+    _ ->
+      lager:error("Unknown indexSpec command: ~p ", Command)
+  end,
+  apply_index_spec(Tail, Folder).
+
+add_index(IndexName, _IndexValue, Folder) ->
+  IndexFile = filename:join([Folder, "indeces", IndexName]),
+  filelib:ensure_dir(filename:join(indexFile, "dummy")),
+%%  filelib:is_file
+  file:write_file(IndexFile, "to_be_a_link"),
+  lager:error("ADD!").
+
+remove_index(_IndexName, _IndexValue, _Folder) ->
+  lager:error("REMOVE!").
 
 %% @doc Delete an object from the backend
 -spec delete(riak_object:bucket(), riak_object:key(), [index_spec()], state()) ->
