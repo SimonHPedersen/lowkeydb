@@ -56,7 +56,7 @@ capabilities(_, _) ->
 start(Partition, Config) ->
   DataDir = app_helper:get_prop_or_env(data_root, Config, lowkeydb),
   NodeDataDir = filename:join(DataDir, integer_to_list(Partition)),
-  lager:debug("NodeDataDir: ~p", [NodeDataDir]),
+%%  lager:debug("NodeDataDir: ~p", [NodeDataDir]),
   filelib:ensure_dir(filename:join(NodeDataDir, "dummy")),
   {ok, #state{folder_ref=NodeDataDir}}.
 
@@ -157,14 +157,14 @@ fold_keys(FoldKeyFun, Acc, Opts, #state{folder_ref=DataDir}) ->
 
 list_keys_fold_fun() ->
   fun (KeyFileName, Acc) ->
-    [_|Tail] = string:tokens(binary_to_list(KeyFileName), "_"),
-    case string:equal(Tail, ["content"]) of
-      true -> Acc;
-      false -> [Acc, KeyFileName]
+    [Head|_] = lists:reverse(string:tokens(KeyFileName, "_")),
+    case Head of
+      "content" -> Acc;
+      _ 		-> Acc ++ [filename:basename(KeyFileName)]
     end
   end.
 
-list_keys(Bucket, DataDir) ->
+list_keys(DataDir, Bucket) ->
   BucketDataDir = filename:join(DataDir, Bucket),
   case file:list_dir(BucketDataDir) of
     {ok, FileNames} -> lists:foldl(list_keys_fold_fun(), [], FileNames);
@@ -183,13 +183,12 @@ list_buckets(_DataDir, Bucket) ->
   [Bucket].
 
 fold_objects_over_buckets (FoldFun, DataDir, Buckets, Acc) ->
-  list:foldl(
+  lists:foldl(
     fun (Bucket, AccBucket) ->
-      Keys = list_keys(Bucket, DataDir),
-      list:foldl(
+      Keys = list_keys(DataDir, Bucket),
+      lists:foldl(
         fun (Key, AccKey) ->
           KeyFile = filename:join([DataDir, Bucket, Key]),
-          lager:debug("KeyFile in fold objects: ~p ", KeyFile),
           case file:read_file(KeyFile) of
             {ok, Value} -> FoldFun(Bucket, Key, Value, AccKey);
             _ -> AccKey
