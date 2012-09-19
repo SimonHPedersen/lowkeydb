@@ -189,6 +189,7 @@ fold_objects_over_buckets (FoldFun, DataDir, Buckets, Acc) ->
       list:foldl(
         fun (Key, AccKey) ->
           KeyFile = filename:join([DataDir, Bucket, Key]),
+          lager:debug("KeyFile in fold objects: ~p ", KeyFile),
           case file:read_file(KeyFile) of
             {ok, Value} -> FoldFun(Bucket, Key, Value, AccKey);
             _ -> AccKey
