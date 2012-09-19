@@ -2,6 +2,8 @@
 -module(riak_kv_lowkeydb_backend).
 %-behavior(riak_kv_backend).
 
+-import(file_utils).
+
 %% Riak Storage Backend API
 -export([api_version/0,
          capabilities/1,
@@ -112,9 +114,9 @@ delete(Bucket, Key, _IndexSpecs, #state{folder_ref=Folder}=State) ->
 
 %% @doc Creates a fun that converts entries to string, and then pass it on to FoldFun
 list_to_binary_fold_fun(FoldFun) ->
-	fun (Folder, Acc) ->
-		StringFolder = list_to_binary(Folder),
-		FoldFun(StringFolder, Acc)
+	fun (DataDir, Acc) ->
+		StringDataDir = list_to_binary(DataDir),
+		FoldFun(StringDataDir, Acc)
 	end.
 
 %% @doc Fold over all the buckets
@@ -122,9 +124,9 @@ list_to_binary_fold_fun(FoldFun) ->
                    any(),
                    [any],
                    state()) -> {ok, any()} | {async, fun()}.
-fold_buckets(FoldFun, Acc, _Opts, #state{folder_ref=Folder}) ->
+fold_buckets(FoldFun, Acc, _Opts, #state{folder_ref=DataDir}) ->
 	RealFun = list_to_binary_fold_fun(FoldFun),
-	case file:list_dir(Folder) of
+	case file:list_dir(DataDir) of
 		{ok, Files} -> AccOut = lists:foldl(RealFun, Acc, Files),
 					   {ok, AccOut};
 		{error, _Reason} -> {error, "Error listing buckets"}
@@ -145,21 +147,65 @@ lowkey_uber_folder_fun(FoldFun, Bucket) ->
                 any(),
                 [{atom(), term()}],
                 state()) -> {ok, term()} | {async, fun()}.
-fold_keys(FoldKeyFun, Acc, Opts, #state{folder_ref=Folder}) ->
+fold_keys(FoldKeyFun, Acc, Opts, #state{folder_ref=DataDir}) ->
   Bucket = proplists:get_value(bucket, Opts),
   RealFun = lowkey_uber_folder_fun(FoldKeyFun, Bucket),
-  {ok, Files} = file_utils:recursively_list_dir(Folder, true),
+  {ok, Files} = file_utils:recursively_list_dir(DataDir, true),
   AccOut = lists:foldl(RealFun, Acc, Files),
     {ok, AccOut}.
 
+list_keys_fold_fun() ->
+  fun (KeyFileName, Acc) ->
+    [Head|_] = lists:reverse(string:tokens(KeyFileName, "_")),
+    case Head of
+      "content" -> Acc;
+      _ 		-> Acc ++ [filename:basename(KeyFileName)]
+    end
+  end.
+
+list_keys(DataDir, Bucket) ->
+  BucketDataDir = filename:join(DataDir, Bucket),
+  case file:list_dir(BucketDataDir) of
+    {ok, FileNames} -> lists:foldl(list_keys_fold_fun(), [], FileNames);
+    _ -> []
+  end.
+
+list_buckets(DataDir) ->
+  case file:list_dir(DataDir) of
+    {ok, BucketNames} ->  BucketNames;
+    _ -> []
+  end.
+
+list_buckets(DataDir, undefined) ->
+  list_buckets(DataDir);
+list_buckets(_DataDir, Bucket) ->
+  [Bucket].
+
+fold_objects_over_buckets (FoldFun, DataDir, Buckets, Acc) ->
+  lists:foldl(
+    fun (Bucket, AccBucket) ->
+      Keys = list_keys(DataDir, Bucket),
+      lists:foldl(
+        fun (Key, AccKey) ->
+          KeyFile = filename:join([DataDir, Bucket, Key]),
+          case file:read_file(KeyFile) of
+            {ok, Value} -> FoldFun(Bucket, Key, Value, AccKey);
+            _ -> AccKey
+          end
+        end
+      , AccBucket, Keys)
+    end
+  , Acc, Buckets).
 
 %% @doc Fold over all the objects for one or all buckets.
 -spec fold_objects(riak_kv_backend:fold_objects_fun(),
                    any(),
                    [{atom(), term()}],
                    state()) -> {ok, any()} | {async, fun()}.
-fold_objects(_FoldObjectsFun, _Acc, _Opts, _State) ->
-	{ok, doki}.
+fold_objects(FoldObjectsFun, Acc, Opts, #state{folder_ref=DataDir}) ->
+  Bucket = proplists:get_value(bucket, Opts),
+  Buckets = list_buckets(DataDir, Bucket),
+  fold_objects_over_buckets(FoldObjectsFun, DataDir, Buckets, Acc).
 
 %% @doc Delete all objects from this backend
 %% and return a fresh reference.
