@@ -25,7 +25,7 @@
 -type config() :: [any()].
 
 -define(API_VERSION, 1).
--define(CAPABILITIES, []).
+-define(CAPABILITIES, [indexes]).
 
 %% ===================================================================
 %% Public API
@@ -53,10 +53,12 @@ capabilities(_, _) ->
 -spec start(integer(), config()) -> {ok, state()} | {error, term()}.
 start(Partition, Config) ->
   Folder = app_helper:get_prop_or_env(data_root, Config, lowkeydb),
-  NodeFolder = filename:join(Folder, integer_to_list(Partition)),
-  lager:debug("Folder: ~p", [NodeFolder]),
-  filelib:ensure_dir(filename:join(NodeFolder, "dummy")),
-  {ok, #state{folder_ref=NodeFolder}}.
+  PartitionRootFolder = filename:join([Folder, integer_to_list(Partition)]),
+  PartitionDataFolder = filename:join([Folder, integer_to_list(Partition), "buckets"]),
+  PartitionIndexFolder = filename:join([Folder, integer_to_list(Partition), "indeces"]),
+  filelib:ensure_dir(filename:join(PartitionDataFolder, "dummy")),
+  filelib:ensure_dir(filename:join(PartitionIndexFolder, "dummy")),
+  {ok, #state{folder_ref=PartitionRootFolder}}.
 
 %% @doc Stop the backend
 -spec stop(state()) -> ok.
@@ -69,7 +71,7 @@ stop(_State) ->
                  {ok, not_found, state()} |
                  {error, term(), state()}.
 get(Bucket, Key, #state{folder_ref=Folder}=State) ->
-  KeyFile = filename:join([Folder, Bucket, Key]),
+  KeyFile = filename:join([Folder, "buckets", Bucket, Key]),
   case file:read_file(KeyFile) of
   {ok, Value} -> {ok, Value, State};
   {error, enoent} -> {error, not_found, State};
@@ -83,21 +85,18 @@ get(Bucket, Key, #state{folder_ref=Folder}=State) ->
                  {ok, state()} |
                  {error, term(), state()}.
 
-put(Bucket, Key, _IndexSpec, Value, #state{folder_ref=Folder}=State) ->
-  RawFile = filename:join([Folder, Bucket, Key]),
+put(Bucket, Key, IndexSpec, Value, #state{folder_ref=Folder}=State) ->
+  RawFile = filename:join([Folder, "buckets", Bucket, Key]),
   filelib:ensure_dir(RawFile),
   ContentFile = filename:join([Folder, Bucket, string:concat(binary_to_list(Key), "_content")]),
-  lager:debug("put ValueAsTerm ~p", [binary_to_term(Value)]),
   [ContentTerm] = element(4, binary_to_term(Value)), %% unpack list by using []
-  lager:debug("put ContentTerm ~p", [ContentTerm]),
-  FirstElem = element(1, ContentTerm),
-  lager:debug("put FirstElem ~p", [FirstElem]),
-  MetaInf = element(2, ContentTerm),
-  lager:debug("put MetaInf ~p", [MetaInf]),
   ContentAsIntArray = binary_to_list(element(3, ContentTerm)),
-  lager:debug("put Content ~p", [ContentAsIntArray]),
   file:write_file(RawFile, Value),
   file:write_file(ContentFile, ContentAsIntArray),
+
+  %% put indeces
+  lager:error("Index: ~p", IndexSpec),
+
   {ok, State}.
 
 %% @doc Delete an object from the backend
@@ -105,7 +104,7 @@ put(Bucket, Key, _IndexSpec, Value, #state{folder_ref=Folder}=State) ->
                     {ok, state()} |
                     {error, term(), state()}.
 delete(Bucket, Key, _IndexSpecs, #state{folder_ref=Folder}=State) ->
-  KeyFile = filename:join([Folder, Bucket, Key]),
+  KeyFile = filename:join([Folder, "buckets", Bucket, Key]),
   case file:delete(KeyFile) of
   ok -> {ok, State};
   {error, Reason} -> {error, Reason, State}
