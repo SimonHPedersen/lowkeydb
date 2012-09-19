@@ -210,19 +210,36 @@ fold_objects(FoldObjectsFun, Acc, Opts, #state{folder_ref=DataDir}) ->
 %% @doc Delete all objects from this backend
 %% and return a fresh reference.
 -spec drop(state()) -> {ok, state()} | {error, term(), state()}.
-drop(State) ->
+drop(#state{folder_ref=DataDir}=State) ->
+	Buckets = list_buckets(DataDir),
+	BucketDeleterFun = 
+		fun (Bucket) ->
+			Keys = list_keys(DataDir, Bucket),
+			ObjectDeleterFun = 
+				fun (Key) ->
+					KeyPath = filename:join([DataDir, Bucket, Key]),
+					file:delete(KeyPath)
+				end,
+			lists:foreach(ObjectDeleterFun, Keys),
+			file:del_dir(filename:join([DataDir, Bucket]))
+		end,
+	lists:foreach(BucketDeleterFun, Buckets),
 	{ok, State}.
 
 %% @doc Returns true if this backend contains any
 %% non-tombstone values; otherwise returns false.
 -spec is_empty(state()) -> boolean() | {error, term()}.
-is_empty(_State) ->
-	false.
+is_empty(#state{folder_ref=DataDir}) ->
+	{ok, Files} = file_utils:recursively_list_dir(DataDir, true),
+	case length(Files) of
+		0 -> true;
+		_ -> false
+	end.
 
 %% @doc Get the status information for this backend
 -spec status(state()) -> [{atom(), term()}].
 status(_Status) ->
-	[{stats, "Ohh yea baby"}].
+	[{stats, "not too bad"}].
 
 %% @doc Register an asynchronous callback
 -spec callback(reference(), any(), state()) -> {ok, state()}.
