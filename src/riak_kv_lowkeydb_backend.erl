@@ -115,19 +115,18 @@ apply_index_spec([{Command, IndexName, IndexValue} | Tail], BaseDir, Bucket, Key
   apply_index_spec(Tail, BaseDir, Bucket, Key).
 
 add_index(IndexName, IndexValue, BaseDir, Bucket, Key) ->
-  IndexFile = filename:join([BaseDir, "indeces", IndexName, IndexValue]),
+  IndexFile = filename:join([BaseDir, "indeces", IndexName, IndexValue, Bucket, Key]),
   filelib:ensure_dir(IndexFile),
   filelib:ensure_dir(filename:join(indexFile, "dummy")),
   case filelib:is_file(IndexFile) of
     true ->
       lager:error("Index symlink already exists! Making a new one by appending _"),
-      add_index(list_to_binary(string:concat(binary_to_list(IndexName), "_")), IndexValue, BaseDir, Bucket, Key);
+      add_index(IndexName, list_to_binary(string:concat(binary_to_list(IndexValue), "_")), BaseDir, Bucket, Key);
     false ->
-      TargetFile = filename:join(["../../buckets", Bucket, Key]),
+      TargetFile = filename:join(["../../../../buckets", Bucket, Key]),
       lager:error("Adding symlink from ~p to ~p", [IndexFile, TargetFile]),
       file:make_symlink(TargetFile, IndexFile)
-  end,
-  lager:error("ADD!").
+  end.
 
 remove_index(_IndexName, _IndexValue, _BaseDir) ->
   lager:error("REMOVE!").
