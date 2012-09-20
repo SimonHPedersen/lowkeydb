@@ -165,12 +165,27 @@ list_to_binary_fold_fun(FoldFun) ->
                 [{atom(), term()}],
                 state()) -> {ok, term()} | {async, fun()}.
 fold_keys(FoldKeyFun, Acc, Opts, #state{basedir_ref=BaseDir}) ->
-  BucketDir = filename:join(BaseDir, "buckets"),
-  Bucket = proplists:get_value(bucket, Opts),
-  RealFun = lowkey_uber_folder_fun(FoldKeyFun, Bucket),
-  {ok, Files} = file_utils:recursively_list_dir(BucketDir, true),
-  AccOut = lists:foldl(RealFun, Acc, Files),
-    {ok, AccOut}.
+  case Opts of
+    [{index, IndexBucket, IndexLookup},_] ->
+      lager:error("fold_keys. IndexBucket ~p IndexLookup ~p", [IndexBucket,IndexLookup]),
+      case IndexLookup of
+        {range, IndexName, StartKey, EndKey} ->
+          lager:error("fold_keys. range search. Index: ~p StartKey: ~p EndKey: ~p", [IndexName, StartKey, EndKey]);
+        %% TODO: implement
+        {eq, IndexName, Key} ->
+          lager:error("fold_keys. Direct index lookup. Index: ~p Key: ~p", [IndexName, Key])
+        %% TODO: implement
+      end,
+      {ok, []}
+      ;
+    [{bucket, Bucket}] ->
+      lager:error("fold_keys. Listing all keys in Bucket ~p", [Bucket]),
+      BucketDir = filename:join(BaseDir, "buckets"),
+      RealFun = lowkey_uber_folder_fun(FoldKeyFun, Bucket),
+      {ok, Files} = file_utils:recursively_list_dir(BucketDir, true),
+      AccOut = lists:foldl(RealFun, Acc, Files),
+      {ok, AccOut}
+  end.
 
 lowkey_uber_folder_fun(FoldFun, Bucket) ->
   fun (Key, Acc) ->
