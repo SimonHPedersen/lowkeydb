@@ -168,33 +168,50 @@ fold_keys(FoldKeyFun, Acc, Opts, #state{basedir_ref=BaseDir}) ->
   case Opts of
     [{index, IndexBucket, IndexLookup},_] ->
       lager:error("fold_keys. IndexBucket ~p IndexLookup ~p", [IndexBucket,IndexLookup]),
-      case IndexLookup of
-        {range, IndexName, StartKey, EndKey} ->
-          lager:error("fold_keys. range search. Index: ~p StartKey: ~p EndKey: ~p", [IndexName, StartKey, EndKey]);
-        %% TODO: implement
-        {eq, IndexName, Key} ->
-          lager:error("fold_keys. Direct index lookup. Index: ~p Key: ~p", [IndexName, Key])
-        %% TODO: implement
-      end,
-      {ok, []}
-      ;
+    case IndexLookup of
+      {range, IndexName, StartKey, EndKey} ->
+        lager:error("fold_keys. range search. Index: ~p StartKey: ~p EndKey: ~p", [IndexName, StartKey, EndKey]);
+      %% TODO: implement
+      {eq, IndexName, IndexValue} ->
+        lager:error("fold_keys. Direct index lookup. IndexName: ~p IndexValue: ~p", [IndexName, IndexValue]),
+        IndexDir = filename:join([BaseDir, "indeces", IndexName, IndexValue]),
+        case filelib:is_dir(IndexDir) of
+          true ->
+            {ok, Files} = file_utils:recursively_list_dir(IndexDir, true),
+            lager:error("fold_keys. found Files: ~p", [Files]),
+            RealFun = filename_2_bucket_key_folder_fun(FoldKeyFun),
+            AccOut = lists:foldl(RealFun, Acc, Files),
+            {ok, AccOut};
+          false ->    %% Nothing found
+            {ok, Acc}
+        end
+    end;
     [{bucket, Bucket}] ->
       lager:error("fold_keys. Listing all keys in Bucket ~p", [Bucket]),
       BucketDir = filename:join(BaseDir, "buckets"),
-      RealFun = lowkey_uber_folder_fun(FoldKeyFun, Bucket),
       {ok, Files} = file_utils:recursively_list_dir(BucketDir, true),
+      RealFun = lowkey_uber_folder_fun(FoldKeyFun),
       AccOut = lists:foldl(RealFun, Acc, Files),
       {ok, AccOut}
   end.
 
-lowkey_uber_folder_fun(FoldFun, Bucket) ->
+lowkey_uber_folder_fun(FoldFun) ->
   fun (Key, Acc) ->
     StringKey = filename:basename(list_to_binary(Key)),
     [_|Tail] = string:tokens(binary_to_list(StringKey), "_"),
     case string:equal(Tail, ["content"]) of
       true -> Acc;
-      false -> FoldFun(Bucket, StringKey, Acc)
+      false -> FoldFun(StringKey, Acc)
     end
+  end.
+
+filename_2_bucket_key_folder_fun(FoldFun) ->
+  fun (FileName, Acc) ->
+    Tokens = filename:split(FileName),
+    Key = lists:last(Tokens),
+    Bucket = lists:nth(length(Tokens) -1, Tokens),
+    lager:error("Bucket ~p Key ~p", [Bucket, Key]),
+    FoldFun(Bucket, Key, Acc)
   end.
 
 
