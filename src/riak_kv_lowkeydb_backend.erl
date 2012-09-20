@@ -97,28 +97,36 @@ put(Bucket,  Key, IndexSpec, Value, #state{basedir_ref=BaseDir}=State) ->
   file:write_file(ContentFile, ContentAsIntArray),
 
   %% update indeces
-  apply_index_spec(IndexSpec, BaseDir),
+  apply_index_spec(IndexSpec, BaseDir, Bucket, Key),
   {ok, State}.
 
-apply_index_spec([], _Dir) -> 0;
+apply_index_spec([], _BaseDir, _Bucket, _Key) -> 0;
 
-apply_index_spec([{Command, IndexName, IndexValue} | Tail], BaseDir) ->
-  %% lager:error("aplying indexSpec. Command ~p, IndexName ~p, IndexValue ~p", [Command, IndexName, IndexValue]),
+apply_index_spec([{Command, IndexName, IndexValue} | Tail], BaseDir, Bucket, Key) ->
+%% lager:error("aplying indexSpec. Command ~p, IndexName ~p, IndexValue ~p", [Command, IndexName, IndexValue]),
   case Command of
     add ->
-      add_index(IndexName, IndexValue, BaseDir);
+      add_index(IndexName, IndexValue, BaseDir, Bucket, Key);
     remove ->
       remove_index(IndexName, IndexValue, BaseDir);
     _ ->
       lager:error("Unknown indexSpec command: ~p ", Command)
   end,
-  apply_index_spec(Tail, BaseDir).
+  apply_index_spec(Tail, BaseDir, Bucket, Key).
 
-add_index(IndexName, _IndexValue, BaseDir) ->
-  IndexFile = filename:join([BaseDir, "indeces", IndexName]),
+add_index(IndexName, IndexValue, BaseDir, Bucket, Key) ->
+  IndexFile = filename:join([BaseDir, "indeces", IndexName, IndexValue]),
+  filelib:ensure_dir(IndexFile),
   filelib:ensure_dir(filename:join(indexFile, "dummy")),
-%%  filelib:is_file
-  file:write_file(IndexFile, "to_be_a_link"),
+  case filelib:is_file(IndexFile) of
+    true ->
+      lager:error("Index symlink already exists! Making a new one by appending _"),
+      add_index(list_to_binary(string:concat(binary_to_list(IndexName), "_")), IndexValue, BaseDir, Bucket, Key);
+    false ->
+      TargetFile = filename:join(["../../buckets", Bucket, Key]),
+      lager:error("Adding symlink from ~p to ~p", [IndexFile, TargetFile]),
+      file:make_symlink(TargetFile, IndexFile)
+  end,
   lager:error("ADD!").
 
 remove_index(_IndexName, _IndexValue, _BaseDir) ->
