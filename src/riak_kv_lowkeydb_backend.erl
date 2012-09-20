@@ -21,7 +21,7 @@
          status/1,
          callback/3]).
 
--record(state, {folder_ref :: string()}).
+-record(state, {basedir_ref :: string()}).
 
 -type state() :: #state{}.
 -type config() :: [any()].
@@ -38,7 +38,7 @@
 %% The current valid capabilities are async_fold
 %% and indexes.
 -spec api_version() -> {integer(), [atom()]}.
-api_version() -> 
+api_version() ->
 	{?API_VERSION, [alpha]}.
 
 %% @doc Return the capabilities of the backend.
@@ -54,13 +54,13 @@ capabilities(_, _) ->
 %% @doc Start the backend
 -spec start(integer(), config()) -> {ok, state()} | {error, term()}.
 start(Partition, Config) ->
-  Folder = app_helper:get_prop_or_env(data_root, Config, lowkeydb),
-  PartitionRootFolder = filename:join([Folder, integer_to_list(Partition)]),
-  PartitionDataFolder = filename:join([Folder, integer_to_list(Partition), "buckets"]),
-  PartitionIndexFolder = filename:join([Folder, integer_to_list(Partition), "indeces"]),
-  filelib:ensure_dir(filename:join(PartitionDataFolder, "dummy")),
-  filelib:ensure_dir(filename:join(PartitionIndexFolder, "dummy")),
-  {ok, #state{folder_ref=PartitionRootFolder}}.
+  BaseDir = app_helper:get_prop_or_env(data_root, Config, lowkeydb),
+  PartitionRootDir = filename:join([BaseDir, integer_to_list(Partition)]),
+  PartitionDataDir = filename:join(PartitionRootDir, "buckets"),
+  PartitionIndexDir = filename:join(PartitionRootDir, "indeces"),
+  filelib:ensure_dir(filename:join(PartitionDataDir, "dummy")),
+  filelib:ensure_dir(filename:join(PartitionIndexDir, "dummy")),
+  {ok, #state{basedir_ref=PartitionRootDir}}.
 
 %% @doc Stop the backend
 -spec stop(state()) -> ok.
@@ -72,8 +72,8 @@ stop(_State) ->
                  {ok, any(), state()} |
                  {ok, not_found, state()} |
                  {error, term(), state()}.
-get(Bucket, Key, #state{folder_ref=Folder}=State) ->
-  KeyFile = filename:join([Folder, "buckets", Bucket, Key]),
+get(Bucket, Key, #state{basedir_ref=BaseDir}=State) ->
+  KeyFile = filename:join([BaseDir, "buckets", Bucket, Key]),
   case file:read_file(KeyFile) of
   {ok, Value} -> {ok, Value, State};
   {error, enoent} -> {error, not_found, State};
@@ -87,73 +87,87 @@ get(Bucket, Key, #state{folder_ref=Folder}=State) ->
                  {ok, state()} |
                  {error, term(), state()}.
 
-put(Bucket,  Key, IndexSpec, Value, #state{folder_ref=Folder}=State) ->
-  RawFile = filename:join([Folder, "buckets", Bucket, Key]),
+put(Bucket,  Key, IndexSpec, Value, #state{basedir_ref=BaseDir}=State) ->
+  RawFile = filename:join([BaseDir, "buckets", Bucket, Key]),
   filelib:ensure_dir(RawFile),
-  ContentFile = filename:join([Folder, Bucket, string:concat(binary_to_list(Key), "_content")]),
+  ContentFile = filename:join([BaseDir, Bucket, string:concat(binary_to_list(Key), "_content")]),
   [ContentTerm] = element(4, binary_to_term(Value)), %% unpack list by using []
   ContentAsIntArray = binary_to_list(element(3, ContentTerm)),
   file:write_file(RawFile, Value),
   file:write_file(ContentFile, ContentAsIntArray),
 
   %% update indeces
-  apply_index_spec(IndexSpec, Folder),
+  apply_index_spec(IndexSpec, BaseDir),
   {ok, State}.
 
-apply_index_spec([], _Folder) -> 0;
+apply_index_spec([], _Dir) -> 0;
 
-apply_index_spec([{Command, IndexName, IndexValue} | Tail], Folder) ->
+apply_index_spec([{Command, IndexName, IndexValue} | Tail], BaseDir) ->
   %% lager:error("aplying indexSpec. Command ~p, IndexName ~p, IndexValue ~p", [Command, IndexName, IndexValue]),
   case Command of
     add ->
-      add_index(IndexName, IndexValue, Folder);
+      add_index(IndexName, IndexValue, BaseDir);
     remove ->
-      remove_index(IndexName, IndexValue, Folder);
+      remove_index(IndexName, IndexValue, BaseDir);
     _ ->
       lager:error("Unknown indexSpec command: ~p ", Command)
   end,
-  apply_index_spec(Tail, Folder).
+  apply_index_spec(Tail, BaseDir).
 
-add_index(IndexName, _IndexValue, Folder) ->
-  IndexFile = filename:join([Folder, "indeces", IndexName]),
+add_index(IndexName, _IndexValue, BaseDir) ->
+  IndexFile = filename:join([BaseDir, "indeces", IndexName]),
   filelib:ensure_dir(filename:join(indexFile, "dummy")),
 %%  filelib:is_file
   file:write_file(IndexFile, "to_be_a_link"),
   lager:error("ADD!").
 
-remove_index(_IndexName, _IndexValue, _Folder) ->
+remove_index(_IndexName, _IndexValue, _BaseDir) ->
   lager:error("REMOVE!").
 
 %% @doc Delete an object from the backend
 -spec delete(riak_object:bucket(), riak_object:key(), [index_spec()], state()) ->
                     {ok, state()} |
                     {error, term(), state()}.
-delete(Bucket, Key, _IndexSpecs, #state{folder_ref=Folder}=State) ->
-  KeyFile = filename:join([Folder, "buckets", Bucket, Key]),
+delete(Bucket, Key, _IndexSpecs, #state{basedir_ref=BaseDir}=State) ->
+  KeyFile = filename:join([BaseDir, "buckets", Bucket, Key]),
   case file:delete(KeyFile) of
   ok -> {ok, State};
   {error, Reason} -> {error, Reason, State}
   end.
-
-%% @doc Creates a fun that converts entries to string, and then pass it on to FoldFun
-list_to_binary_fold_fun(FoldFun) ->
-	fun (DataDir, Acc) ->
-		StringDataDir = list_to_binary(DataDir),
-		FoldFun(StringDataDir, Acc)
-	end.
 
 %% @doc Fold over all the buckets
 -spec fold_buckets(riak_kv_backend:fold_buckets_fun(),
                    any(),
                    [any],
                    state()) -> {ok, any()} | {async, fun()}.
-fold_buckets(FoldFun, Acc, _Opts, #state{folder_ref=DataDir}) ->
+fold_buckets(FoldFun, Acc, _Opts, #state{basedir_ref=BaseDir}) ->
+  BucketDir = filename:join(BaseDir, "buckets"),
 	RealFun = list_to_binary_fold_fun(FoldFun),
-	case file:list_dir(DataDir) of
+	case file:list_dir(BucketDir) of
 		{ok, Files} -> AccOut = lists:foldl(RealFun, Acc, Files),
 					   {ok, AccOut};
 		{error, _Reason} -> {error, "Error listing buckets"}
 	end.
+
+%% @doc Creates a fun that converts entries to string, and then pass it on to FoldFun
+list_to_binary_fold_fun(FoldFun) ->
+  fun (BaseDir, Acc) ->
+    StringBaseDir = list_to_binary(BaseDir),
+    FoldFun(StringBaseDir, Acc)
+  end.
+
+%% @doc Fold over all the keys for one or all buckets.
+-spec fold_keys(riak_kv_backend:fold_keys_fun(),
+                any(),
+                [{atom(), term()}],
+                state()) -> {ok, term()} | {async, fun()}.
+fold_keys(FoldKeyFun, Acc, Opts, #state{basedir_ref=BaseDir}) ->
+  BucketDir = filename:join(BaseDir, "buckets"),
+  Bucket = proplists:get_value(bucket, Opts),
+  RealFun = lowkey_uber_folder_fun(FoldKeyFun, Bucket),
+  {ok, Files} = file_utils:recursively_list_dir(BucketDir, true),
+  AccOut = lists:foldl(RealFun, Acc, Files),
+    {ok, AccOut}.
 
 lowkey_uber_folder_fun(FoldFun, Bucket) ->
   fun (Key, Acc) ->
@@ -165,17 +179,6 @@ lowkey_uber_folder_fun(FoldFun, Bucket) ->
     end
   end.
 
-%% @doc Fold over all the keys for one or all buckets.
--spec fold_keys(riak_kv_backend:fold_keys_fun(),
-                any(),
-                [{atom(), term()}],
-                state()) -> {ok, term()} | {async, fun()}.
-fold_keys(FoldKeyFun, Acc, Opts, #state{folder_ref=DataDir}) ->
-  Bucket = proplists:get_value(bucket, Opts),
-  RealFun = lowkey_uber_folder_fun(FoldKeyFun, Bucket),
-  {ok, Files} = file_utils:recursively_list_dir(DataDir, true),
-  AccOut = lists:foldl(RealFun, Acc, Files),
-    {ok, AccOut}.
 
 list_keys_fold_fun() ->
   fun (KeyFileName, Acc) ->
@@ -225,7 +228,7 @@ fold_objects_over_buckets (FoldFun, DataDir, Buckets, Acc) ->
                    any(),
                    [{atom(), term()}],
                    state()) -> {ok, any()} | {async, fun()}.
-fold_objects(FoldObjectsFun, Acc, Opts, #state{folder_ref=DataDir}) ->
+fold_objects(FoldObjectsFun, Acc, Opts, #state{basedir_ref=DataDir}) ->
   Bucket = proplists:get_value(bucket, Opts),
   Buckets = list_buckets(DataDir, Bucket),
   fold_objects_over_buckets(FoldObjectsFun, DataDir, Buckets, Acc).
@@ -233,12 +236,12 @@ fold_objects(FoldObjectsFun, Acc, Opts, #state{folder_ref=DataDir}) ->
 %% @doc Delete all objects from this backend
 %% and return a fresh reference.
 -spec drop(state()) -> {ok, state()} | {error, term(), state()}.
-drop(#state{folder_ref=DataDir}=State) ->
+drop(#state{basedir_ref=DataDir}=State) ->
 	Buckets = list_buckets(DataDir),
-	BucketDeleterFun = 
+	BucketDeleterFun =
 		fun (Bucket) ->
 			Keys = list_keys(DataDir, Bucket),
-			ObjectDeleterFun = 
+			ObjectDeleterFun =
 				fun (Key) ->
 					KeyPath = filename:join([DataDir, Bucket, Key]),
 					file:delete(KeyPath)
@@ -252,7 +255,7 @@ drop(#state{folder_ref=DataDir}=State) ->
 %% @doc Returns true if this backend contains any
 %% non-tombstone values; otherwise returns false.
 -spec is_empty(state()) -> boolean() | {error, term()}.
-is_empty(#state{folder_ref=DataDir}) ->
+is_empty(#state{basedir_ref=DataDir}) ->
 	{ok, Files} = file_utils:recursively_list_dir(DataDir, true),
 	case length(Files) of
 		0 -> true;
