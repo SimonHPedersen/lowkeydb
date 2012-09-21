@@ -171,28 +171,54 @@ fold_keys(FoldKeyFun, Acc, Opts, #state{basedir_ref=BaseDir}) ->
     case IndexLookup of
       {range, IndexName, StartKey, EndKey} ->
         lager:error("fold_keys. range search. Index: ~p StartKey: ~p EndKey: ~p", [IndexName, StartKey, EndKey]),
-        IndexDir = filename:join([BaseDir, "indeces", IndexName]),
-        case file:list_dir(IndexDir) of
-          {ok, AllIndexValueDirs} ->
-            lager:error("AllIndexValueDirs: ~p", AllIndexValueDirs),
-            RealFun = indexValue_filtering_folder_fun(FoldKeyFun, IndexDir, StartKey, EndKey),
-            AccOut = lists:foldl(RealFun, Acc, AllIndexValueDirs),
-            {ok, AccOut};
-          _ -> {ok, Acc}
-        end;
+        case IndexName of
+          <<"$key">> ->
+            lager:error("range lookup on special $key index"),
+            BucketDir = filename:join([BaseDir, "buckets", IndexBucket]),
+            case file:list_dir(BucketDir) of
+              {ok, AllFilesInBucket} ->
+                lager:error("found files doing range lookup on $key ~p", [AllFilesInBucket]),
+                RealFun = key_filter_folder_fun(FoldKeyFun, IndexBucket, StartKey, EndKey),
+                {ok, lists:foldl(RealFun, Acc, AllFilesInBucket)};
+                _ -> {ok, Acc}
+            end;
+          _ ->
+                IndexDir = filename:join([BaseDir, "indeces", IndexName]),
+            case file:list_dir(IndexDir) of
+              {ok, AllIndexValueDirs} ->
+                lager:error("AllIndexValueDirs: ~p", AllIndexValueDirs),
+                RealFun = indexValue_filtering_folder_fun(FoldKeyFun, IndexDir, StartKey, EndKey),
+                AccOut = lists:foldl(RealFun, Acc, AllIndexValueDirs),
+                {ok, AccOut};
+              _ -> {ok, Acc}
+            end
+          end;
 
-{eq, IndexName, IndexValue} ->
+        {eq, IndexName, IndexValue} ->
         lager:error("fold_keys. Direct index lookup. IndexName: ~p IndexValue: ~p", [IndexName, IndexValue]),
-        IndexDir = filename:join([BaseDir, "indeces", IndexName, IndexValue]),
-        case filelib:is_dir(IndexDir) of
-          true ->
-            {ok, Files} = file_utils:recursively_list_dir(IndexDir, true),
-            lager:error("fold_keys. found Files: ~p", [Files]),
-            RealFun = filename_2_bucket_key_folder_fun(FoldKeyFun),
-            AccOut = lists:foldl(RealFun, Acc, Files),
-            {ok, AccOut};
-          false ->    %% Nothing found
-            {ok, Acc}
+
+        case IndexName of
+          <<"$key">> ->
+            lager:error("direct lookup on special $key index"),
+            FileName = filename:join([BaseDir, "buckets", IndexBucket, IndexValue]),
+            case filelib:is_file(FileName) of
+              true ->
+                {ok, FoldKeyFun(IndexBucket, IndexValue, Acc)};
+              false ->
+                {ok, Acc}
+            end;
+            _ ->
+            IndexDir = filename:join([BaseDir, "indeces", IndexName, IndexValue]),
+            case filelib:is_dir(IndexDir) of
+              true ->
+                {ok, Files} = file_utils:recursively_list_dir(IndexDir, true),
+                lager:error("fold_keys. found Files: ~p", [Files]),
+                RealFun = filename_2_bucket_key_folder_fun(FoldKeyFun),
+                AccOut = lists:foldl(RealFun, Acc, Files),
+                {ok, AccOut};
+              false ->    %% Nothing found
+                {ok, Acc}
+            end
         end
     end;
     [{bucket, Bucket}] ->
@@ -251,6 +277,19 @@ file_2_bucket_key_folder_fun(FoldFun) ->
     Bucket = lists:nth(length(Tokens) -1, Tokens),
     lager:error("IIIIBucket ~p Key ~p", [Bucket, Key]),
     FoldFun(list_to_binary(Bucket), list_to_binary(Key), Acc)
+  end.
+
+key_filter_folder_fun(FoldFun, Bucket, StartKey, EndKey) ->
+  fun (Key, Acc) ->
+    KeyBin = list_to_binary(Key),
+    lager:error("file_2_bucket_key_folder_fun2 Bucket ~p Key ~p, StartKey ~p, EndKey ~p", [Bucket, KeyBin, StartKey, EndKey]),
+    case KeyBin >= StartKey andalso KeyBin =< EndKey of
+      true ->
+        FoldFun(Bucket, KeyBin , Acc);
+      false ->
+        lager:error("Outside range. Ignore"),
+        Acc
+    end
   end.
 
 
